@@ -1,5 +1,4 @@
 import Parser from 'rss-parser';
-import { insertArxivPaper } from "@podpaper/repository";
 
 const parser = new Parser<{
     feedUrl: string,
