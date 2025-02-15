@@ -4,7 +4,8 @@
   "description": "Podcast the latest papers that suit your taste.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "turbo dev"
   },
   "repository": {
     "type": "git",
@@ -26,6 +27,8 @@
   },
   "homepage": "https://github.com/moons-14/podpaper#readme",
   "devDependencies": {
-    "@biomejs/biome": "1.9.4"
-  }
+    "@biomejs/biome": "1.9.4",
+    "turbo": "^2.4.2"
+  },
+  "packageManager": "pnpm@9.14.4"
 }

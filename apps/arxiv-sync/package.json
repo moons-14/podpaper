@@ -1,16 +1,19 @@
 {
-  "name": "arxiv",
+  "name": "@podpaper/arxiv-sync",
   "version": "0.0.1",
+  "description": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx src/index.ts"
   },
+  "keywords": [],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT",
   "dependencies": {
-    "tsx": "^4.19.2"
+    "rss-parser": "^3.13.0",
+    "tsx": "^4.19.2",
+    "@podpaper/repository": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
