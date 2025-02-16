@@ -1,9 +1,10 @@
 import Parser from 'rss-parser';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import "dotenv/config";
-import { embed, embedMany, generateObject, cosineSimilarity } from "ai"
+import { embed, embedMany, generateObject, cosineSimilarity, generateText } from "ai"
 import { z } from "zod";
 import { createOpenAI } from '@ai-sdk/openai';
+import prompts from 'prompts';
 
 import fs from "fs";
 
@@ -61,7 +62,7 @@ const categoryQuery = "(cat:cs.* OR cat:econ.* OR cat:eess.* OR cat:math.* OR ca
 
 
 
-const getAllPaper = async () => {
+const getAllPaper = async (): Promise<{ author: string; title: string; link: string; summary: string; id: string; isoDate: string; pubDate: Date; }[]> => {
 
     // papers.jsonがあるなら
     if (fs.existsSync("./papers.json")) {
@@ -148,6 +149,33 @@ const userMetadata = {
     notInterest: ['biology', 'geology']
 }
 
+const getPaperMetadata = async (title: string, summary: string) => {
+    const result = await generateObject({
+        model: google("gemini-2.0-flash", {
+            structuredOutputs: true,
+        }),
+        schema: z.object({
+            tags: z.array(z.string()).describe("Please tag words that are important in the paper and that categorize the paper."),
+            target: z.array(z.string()).describe("Please output the professions that will be most affected by this paper. E.g.) web engineer, infrastructure engineer, janitor"),
+            topic: z.string().describe("Please list the single most important topic in the paper."),
+            type: z.enum(["empirical", "theoretical", "literature", "experimental", "simulation"]).describe("Please indicate whether the paper is an empirical study/ theoretical study/ literature review/ experimental study/simulation."),
+        }),
+        prompt: `Please analyze the content based on the names and summaries of the following papers and generate JSON with meta-information.
+
+# Instructions
+Based on the information in the following papers, please summarize the tags, targets, keywords, topics, and types of papers. Please output the results in JSON format.
+Each tag, target, and topic should be assigned a simple, short, precise word.
+
+## Article Title.
+${title}
+
+## Abstract of the paper
+${summary}`,
+    });
+
+    return result.object;
+}
+
 const main = async () => {
     const papers = await getAllPaper();
 
@@ -173,9 +201,6 @@ const main = async () => {
     // // const randomPapers = papers.sort(() => Math.random() - 0.5).slice(0, 10);
     // const randomPapers = papers.filter((_, index) => pickupIndex.includes(index));
 
-    let inputToken = 0;
-    let outputToken = 0;
-
     const embeddingRequests = new Set<string>();
 
 
@@ -191,19 +216,19 @@ const main = async () => {
         pubDate: Date,
         tags: {
             raw: string[],
-            embedding: number[][]
+            embedding?: number[][]
         },
         target: {
             raw: string[],
-            embedding: number[][]
+            embedding?: number[][]
         },
         topic: {
             raw: string,
-            embedding: number[]
+            embedding?: number[]
         },
         type: string,
-        finalScore: number,
-        debug: {
+        finalScore?: number,
+        debug?: {
             tagScore: number,
             targetScore: number,
             topicScore: number,
@@ -217,63 +242,37 @@ const main = async () => {
 
     await Promise.all(papers.map(async (paper) => {
         try {
-            const result = await generateObject({
-                model: google("gemini-2.0-flash", {
-                    structuredOutputs: true,
-                }),
-                schema: z.object({
-                    tags: z.array(z.string()).describe("Please tag words that are important in the paper and that categorize the paper."),
-                    target: z.array(z.string()).describe("Please output the professions that will be most affected by this paper. E.g.) web engineer, infrastructure engineer, janitor"),
-                    topic: z.string().describe("Please list the single most important topic in the paper."),
-                    type: z.enum(["empirical", "theoretical", "literature", "experimental", "simulation"]).describe("Please indicate whether the paper is an empirical study/ theoretical study/ literature review/ experimental study/simulation."),
-                }),
-                prompt: `Please analyze the content based on the names and summaries of the following papers and generate JSON with meta-information.
+            const result = await getPaperMetadata(paper.title, paper.summary);
 
-# Instructions
-Based on the information in the following papers, please summarize the tags, targets, keywords, topics, and types of papers. Please output the results in JSON format.
-Each tag, target, and topic should be assigned a simple, short, precise word.
-
-## Article Title.
-${paper.title}
-
-## Abstract of the paper
-${paper.summary}`,
-            });
-
-            for (const tag of result.object.tags) {
+            for (const tag of result.tags) {
                 embeddingRequests.add(tag);
             }
 
-            for (const target of result.object.target) {
+            for (const target of result.target) {
                 embeddingRequests.add(target);
             }
 
-            embeddingRequests.add(result.object.topic);
+            embeddingRequests.add(result.topic);
 
 
 
             const paperMetadata = {
                 ...paper,
                 tags: {
-                    raw: result.object.tags,
+                    raw: result.tags,
                 },
                 target: {
-                    raw: result.object.target,
+                    raw: result.target,
                 },
                 topic: {
-                    raw: result.object.topic,
+                    raw: result.topic,
                 },
-                type: result.object.type,
+                type: result.type,
             }
 
             paperMetadataList.push({
                 ...paperMetadata
             });
-
-            inputToken += result.usage.promptTokens;
-            outputToken += result.usage.completionTokens;
-            console.log(`Input tokens: ${inputToken}`);
-            console.log(`Output tokens: ${outputToken}`);
 
             const progress = Math.round((paperMetadataList.length / papers.length) * 100);
             console.log(`LLM Progress: ${progress}% (${paperMetadataList.length}/${papers.length})`);
@@ -405,8 +404,6 @@ ${paper.summary}`,
             notInterestScores,
         }
 
-        console.log(`Input tokens: ${inputToken}`);
-        console.log(`Output tokens: ${outputToken}`);
 
         const progress = Math.round((paperMetadataList.length / papers.length) * 100);
         console.log(`Score Progress: ${progress}% (${paperMetadataList.length}/${papers.length})`);
@@ -414,13 +411,12 @@ ${paper.summary}`,
     }));
 
     // 最終スコアでソート
-    paperMetadataList.sort((a, b) => b.finalScore - a.finalScore);
+    // biome-ignore lint/style/noNonNullAssertion: <explanation>
+    paperMetadataList.sort((a, b) => b.finalScore! - a.finalScore!);
 
     console.log("Recommended papers:");
-    console.log(paperMetadataList.map(paper => `- ${paper.title} (Score: ${paper.finalScore.toFixed(3)})`));
+    console.log(paperMetadataList.map(paper => `- ${paper.title} (Score: ${paper.finalScore?.toFixed(3)})`));
 
-    console.log("ALL Input tokens: ", inputToken);
-    console.log("ALL Output tokens: ", outputToken);
 
     fs.writeFileSync("./result.json", JSON.stringify(paperMetadataList.map(v => {
         // embeddingを削除
@@ -434,7 +430,7 @@ ${paper.summary}`,
 
 }
 
-main();
+// main();
 
 const test = async () => {
     // machine learningをembedding
@@ -492,3 +488,414 @@ const test = async () => {
 }
 
 // test();
+
+// ユーザーの興味を推測する
+
+const googleTranslate = async (text: string) => {
+    // geminiで翻訳
+    const result = await generateText({
+        model: google("gemini-2.0-flash"),
+        system: "与えられた英語を日本語にわかりやすく訳して下さい。出力は訳した本文のみにしてください。それ以外を含めないでください。",
+        prompt: text
+    });
+
+    return result.text;
+}
+
+function filterEmbeddingsByThreshold(group, compareGroup, threshold) {
+    // group内の各論文(i番目)のタグ/ターゲットに対して
+    // compareGroup内の「自分と同じ論文以外」のタグ/ターゲットと比較し
+    // 最大類似度がthreshold以上なら残す
+    return group.map((embeddingsArray, i) => {
+        return embeddingsArray.filter((currentObj) => {
+            let maxSimilarity = 0;
+
+            // compareGroup をすべて回す。
+            // 「自分と同じ論文 (i番目)」は除外したい場合は条件分岐
+            // ただし、compareGroup と group が別物なら単純に全てを比較
+            compareGroup.forEach((otherEmbeddingsArray, j) => {
+                // もし group と compareGroup が同じなら、同じ論文 i を除外する
+                if (group === compareGroup && i === j) {
+                    return; // 同じ論文なのでスキップ
+                }
+
+                // 実際の embedding 同士を比較して最大値を更新
+                for (const otherObj of otherEmbeddingsArray) {
+                    const similarity = cosineSimilarity(currentObj.embedding, otherObj.embedding);
+                    if (similarity > maxSimilarity) {
+                        maxSimilarity = similarity;
+                    }
+                };
+            });
+
+            return maxSimilarity >= threshold;
+        });
+    });
+
+}
+
+async function selectPreferredPaper(papers: {
+    translated: {
+        title: string;
+        summary: string;
+    }
+}[], index1: number, index2: number): Promise<number> {
+    // 2つの論文を表示
+    console.log(`${index1 + 1}.`, papers[index1].translated.title);
+    console.log(papers[index1].translated.summary);
+    console.log(`${index2 + 1}.`, papers[index2].translated.title);
+    console.log(papers[index2].translated.summary);
+
+    // 興味を尋ねる
+    const { response } = await prompts({
+        type: "select",
+        name: "response",
+        message: "どちらの論文が興味を引きましたか？",
+        choices: [
+            { title: papers[index1].translated.title, value: index1 },
+            { title: papers[index2].translated.title, value: index2 }
+        ]
+    });
+
+    return response;
+}
+
+const userInterest = async () => {
+    const papers = await getAllPaper();
+
+    // ランダムに20個の論文を選択
+    const randomPapers = papers
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 20);
+
+    const papersTranslated = await Promise.all(randomPapers.map(async (paper) => {
+        return {
+            ...paper,
+            translated: {
+                title: await googleTranslate(paper.title),
+                summary: await googleTranslate(paper.summary)
+            }
+        }
+    }));
+
+    // randomPapers[0]と[1]を表示
+    console.log("========SELECT PAPER ========");
+    const response1 = await selectPreferredPaper(papersTranslated, 0, 1);
+    const response2 = await selectPreferredPaper(papersTranslated, 2, 3);
+    const response3 = await selectPreferredPaper(papersTranslated, 4, 5);
+    const response4 = await selectPreferredPaper(papersTranslated, 6, 7);
+    const response5 = await selectPreferredPaper(papersTranslated, 8, 9);
+    const response6 = await selectPreferredPaper(papersTranslated, 10, 11);
+    const response7 = await selectPreferredPaper(papersTranslated, 12, 13);
+    const response8 = await selectPreferredPaper(papersTranslated, 14, 15);
+    const response9 = await selectPreferredPaper(papersTranslated, 16, 17);
+    const response10 = await selectPreferredPaper(papersTranslated, 18, 19);
+
+
+    // 興味を引いた論文を取得
+    const interestedPapers = [response1, response2, response3, response4, response5, response6, response7, response8, response9, response10].map((index) => randomPapers[index]);
+    // 興味を引かなかった論文を取得
+    const notInterestedPapers = randomPapers.filter((paper) => !interestedPapers.includes(paper));
+
+    // すべての論文にタグ、ターゲット、トピックを生成
+
+    const interestedPaperMetadata = await Promise.all(interestedPapers.map(async (paper) => {
+        const object = await getPaperMetadata(paper.title, paper.summary);
+        return {
+            ...paper,
+            tags: {
+                raw: object.tags
+            },
+            target: {
+                raw: object.target
+            },
+            topic: {
+                raw: object.topic
+            },
+        }
+    }));
+
+    const notInterestedPaperMetadata = await Promise.all(notInterestedPapers.map(async (paper) => {
+        const object = await getPaperMetadata(paper.title, paper.summary);
+        return {
+            ...paper,
+            tags: {
+                raw: object.tags
+            },
+            target: {
+                raw: object.target
+            },
+            topic: {
+                raw: object.topic
+            },
+        }
+    }));
+
+    const interestedTags = interestedPaperMetadata.map((paper) => paper.tags.raw);
+    const interestedTargets = interestedPaperMetadata.map((paper) => paper.target.raw);
+
+    const notInterestedTags = notInterestedPaperMetadata.map((paper) => paper.tags.raw);
+    const notInterestedTargets = notInterestedPaperMetadata.map((paper) => paper.target.raw);
+
+    const notInterestedTagsFiltered = notInterestedTags.filter((tag) => !interestedTags.includes(tag));
+    const notInterestedTargetsFiltered = notInterestedTargets.filter((target) => !interestedTargets.includes(target));
+
+    // すべてのタグとターゲットをembedding
+    const allTags = [...interestedTags, ...notInterestedTagsFiltered];
+    const allTargets = [...interestedTargets, ...notInterestedTargetsFiltered];
+
+    // Create chunks of 100 items to avoid too many requests
+    const allTagsChunks = Array.from(
+        { length: Math.ceil(allTags.flat().length / 100) },
+        (_, i) => allTags.flat().slice(i * 100, (i + 1) * 100)
+    );
+
+    const allTargetsChunks = Array.from(
+        { length: Math.ceil(allTargets.flat().length / 100) },
+        (_, i) => allTargets.flat().slice(i * 100, (i + 1) * 100)
+    );
+
+    // Process chunks sequentially
+    const allTagsEmbedding = (await Promise.all(
+        allTagsChunks.map(async chunk => {
+            return await getGoogleEmbedding(chunk);
+        })
+    )).flat();
+
+    const allTargetsEmbedding = (await Promise.all(
+        allTargetsChunks.map(async chunk => {
+            return await getGoogleEmbedding(chunk);
+        })
+    )).flat();
+
+    // interestedTags,notInterestedTagsFiltered,interestedTargets,notInterestedTargetsFilteredの値にそれぞれのvalueに対応するembeddingを追加していく
+    const interestedTagsEmbedding = interestedTags.map((tags) => tags.map((tag) => {
+        return {
+            raw: tag,
+            embedding: allTagsEmbedding.find((item) => item.text === tag)?.embedding || []
+        }
+    }));
+
+    const interestedTargetsEmbedding = interestedTargets.map((targets) => targets.map((target) => {
+        return {
+            raw: target,
+            embedding: allTargetsEmbedding.find((item) => item.text === target)?.embedding || []
+        }
+    }));
+
+    const notInterestedTagsFilteredEmbedding = notInterestedTagsFiltered.map((tags) => tags.map((tag) => {
+        return {
+            raw: tag,
+            embedding: allTagsEmbedding.find((item) => item.text === tag)?.embedding || []
+        }
+    }));
+
+    const notInterestedTargetsFilteredEmbedding = notInterestedTargetsFiltered.map((targets) => targets.map((target) => {
+        return {
+            raw: target,
+            embedding: allTargetsEmbedding.find((item) => item.text === target)?.embedding || []
+        }
+    }));
+
+    const INTEREST_THRESHOLD = 0.75;
+    const NOT_INTEREST_THRESHOLD = 0.5;
+
+    // タグに対してフィルタをかける
+    const filteredInterestedTagsEmbedding = filterEmbeddingsByThreshold(
+        interestedTagsEmbedding,
+        // 「自分以外の論文」と比較するなら、「notInterestedTagsFilteredEmbedding」と両方比較したいケースなどもある
+        // シンプルに “すべて” と比較したいなら連結して渡す
+        interestedTagsEmbedding,
+        INTEREST_THRESHOLD
+    );
+
+    const filteredNotInterestedTagsFilteredEmbedding = filterEmbeddingsByThreshold(
+        notInterestedTagsFilteredEmbedding,
+        // 興味ありのもの + 興味なしの別のもの すべてと比較する場合
+        notInterestedTagsFilteredEmbedding,
+        NOT_INTEREST_THRESHOLD
+    );
+
+    // ターゲットに対してフィルタをかける
+    const filteredInterestedTargetsEmbedding = filterEmbeddingsByThreshold(
+        interestedTargetsEmbedding,
+        interestedTargetsEmbedding,
+        INTEREST_THRESHOLD
+    );
+
+    const filteredNotInterestedTargetsFilteredEmbedding = filterEmbeddingsByThreshold(
+        notInterestedTargetsFilteredEmbedding,
+        notInterestedTargetsFilteredEmbedding,
+        NOT_INTEREST_THRESHOLD
+    );
+
+    // interestedTagsEmbeddingの中でそれぞれの論文の中で最も同じ論文内の類似度の平均が高いものを取得
+    const interestedTagsMostSimilarEmbedding = [];
+    for (let i = 0; i < interestedTagsEmbedding.length; i++) {
+        const similarity: {
+            raw: string,
+            similarity: number,
+            embedding: number[]
+        }[] = [];
+        for (let j = 0; j < interestedTagsEmbedding[i].length; j++) {
+            let maxSimilarity = 0;
+            for (let k = 0; k < interestedTagsEmbedding[i].length; k++) {
+                if (j === k) continue;
+                const currentSimilarity = cosineSimilarity(interestedTagsEmbedding[i][j].embedding, interestedTagsEmbedding[i][k].embedding);
+                if (currentSimilarity > maxSimilarity) {
+                    maxSimilarity = currentSimilarity;
+                }
+            }
+            similarity.push({
+                raw: interestedTagsEmbedding[i][j].raw,
+                similarity: maxSimilarity,
+                embedding: interestedTagsEmbedding[i][j].embedding
+            });
+        }
+
+        similarity.sort((a, b) => b.similarity - a.similarity);
+        interestedTagsMostSimilarEmbedding.push({
+            raw: similarity[0].raw,
+            embedding: similarity[0].embedding
+        });
+    }
+
+    // interestedTargetsEmbeddingの中でそれぞれの論文の中で最も同じ論文内の類似度の平均が高いものを取得
+    const interestedTargetsMostSimilarEmbedding = [];
+    for (let i = 0; i < interestedTargetsEmbedding.length; i++) {
+        const similarity: {
+            raw: string,
+            similarity: number,
+            embedding: number[]
+        }[] = [];
+        for (let j = 0; j < interestedTargetsEmbedding[i].length; j++) {
+            let maxSimilarity = 0;
+            for (let k = 0; k < interestedTargetsEmbedding[i].length; k++) {
+                if (j === k) continue;
+                const currentSimilarity = cosineSimilarity(interestedTargetsEmbedding[i][j].embedding, interestedTargetsEmbedding[i][k].embedding);
+                if (currentSimilarity > maxSimilarity) {
+                    maxSimilarity = currentSimilarity;
+                }
+            }
+            similarity.push({
+                raw: interestedTargetsEmbedding[i][j].raw,
+                similarity: maxSimilarity,
+                embedding: interestedTargetsEmbedding[i][j].embedding
+            });
+        }
+
+        similarity.sort((a, b) => b.similarity - a.similarity);
+        interestedTargetsMostSimilarEmbedding.push({
+            raw: similarity[0].raw,
+            embedding: similarity[0].embedding
+        });
+    }
+
+    // notInterestedTagsFilteredEmbeddingの中でそれぞれの論文の中で最も同じ論文内の類似度の平均が高いものを取得
+    const notInterestedTagsMostSimilarEmbedding = [];
+    for (let i = 0; i < notInterestedTagsFilteredEmbedding.length; i++) {
+        const similarity: {
+            raw: string,
+            similarity: number,
+            embedding: number[]
+        }[] = [];
+        for (let j = 0; j < notInterestedTagsFilteredEmbedding[i].length; j++) {
+            let maxSimilarity = 0;
+            for (let k = 0; k < notInterestedTagsFilteredEmbedding[i].length; k++) {
+                if (j === k) continue;
+                const currentSimilarity = cosineSimilarity(notInterestedTagsFilteredEmbedding[i][j].embedding, notInterestedTagsFilteredEmbedding[i][k].embedding);
+                if (currentSimilarity > maxSimilarity) {
+                    maxSimilarity = currentSimilarity;
+                }
+            }
+            similarity.push({
+                raw: notInterestedTagsFilteredEmbedding[i][j].raw,
+                similarity: maxSimilarity,
+                embedding: notInterestedTagsFilteredEmbedding[i][j].embedding
+            });
+        }
+
+        similarity.sort((a, b) => b.similarity - a.similarity);
+        notInterestedTagsMostSimilarEmbedding.push({
+            raw: similarity[0].raw,
+            embedding: similarity[0].embedding
+        });
+    }
+
+    // notInterestedTargetsFilteredEmbeddingの中でそれぞれの論文の中で最も同じ論文内の類似度の平均が高いものを取得
+    const notInterestedTargetsMostSimilarEmbedding = [];
+    for (let i = 0; i < notInterestedTargetsFilteredEmbedding.length; i++) {
+        const similarity: {
+            raw: string,
+            similarity: number,
+            embedding: number[]
+        }[] = [];
+        for (let j = 0; j < notInterestedTargetsFilteredEmbedding[i].length; j++) {
+            let maxSimilarity = 0;
+            for (let k = 0; k < notInterestedTargetsFilteredEmbedding[i].length; k++) {
+                if (j === k) continue;
+                const currentSimilarity = cosineSimilarity(notInterestedTargetsFilteredEmbedding[i][j].embedding, notInterestedTargetsFilteredEmbedding[i][k].embedding);
+                if (currentSimilarity > maxSimilarity) {
+                    maxSimilarity = currentSimilarity;
+                }
+            }
+            similarity.push({
+                raw: notInterestedTargetsFilteredEmbedding[i][j].raw,
+                similarity: maxSimilarity,
+                embedding: notInterestedTargetsFilteredEmbedding[i][j].embedding
+            });
+        }
+
+        similarity.sort((a, b) => b.similarity - a.similarity);
+        notInterestedTargetsMostSimilarEmbedding.push({
+            raw: similarity[0].raw,
+            embedding: similarity[0].embedding
+        });
+    }
+
+
+
+    const filteredInterestedTagsEmbeddingFlat = filteredInterestedTagsEmbedding.flat().concat(interestedTagsMostSimilarEmbedding);
+    const filteredInterestedTargetsEmbeddingFlat = filteredInterestedTargetsEmbedding.flat().concat(interestedTargetsMostSimilarEmbedding);
+
+    const filteredNotInterestedTagsFilteredEmbeddingFlat = filteredNotInterestedTagsFilteredEmbedding.flat().concat(notInterestedTagsMostSimilarEmbedding);
+    const filteredNotInterestedTargetsFilteredEmbeddingFlat = filteredNotInterestedTargetsFilteredEmbedding.flat().concat(notInterestedTargetsMostSimilarEmbedding);
+
+    // not interestedとinterestedでcos類似度が閾値を超えている場合、not interestedから削除
+    const FilterTHRESHOLD = 0.65;
+    const filteredNotInterestedTagsFilteredEmbeddingFiltered = filteredNotInterestedTagsFilteredEmbeddingFlat.filter((tag) => {
+        for (const interestedTag of filteredInterestedTagsEmbeddingFlat) {
+            if (cosineSimilarity(tag.embedding, interestedTag.embedding) > FilterTHRESHOLD) {
+                return false;
+            }
+        }
+        return true;
+    });
+
+    const filteredNotInterestedTargetsFilteredEmbeddingFiltered = filteredNotInterestedTargetsFilteredEmbeddingFlat.filter((target) => {
+        for (const interestedTarget of filteredInterestedTargetsEmbeddingFlat) {
+            if (cosineSimilarity(target.embedding, interestedTarget.embedding) > FilterTHRESHOLD) {
+                return false;
+            }
+        }
+        return true;
+    });
+
+    // flat
+    const filteredNotInterestedTagsFilteredEmbeddingFilteredFlat = filteredNotInterestedTagsFilteredEmbeddingFiltered.map((item) => item.raw);
+    const filteredNotInterestedTargetsFilteredEmbeddingFilteredFlat = filteredNotInterestedTargetsFilteredEmbeddingFiltered.map((item) => item.raw);
+
+    console.log("Interested Tags");
+    console.log([...new Set(filteredInterestedTagsEmbeddingFlat.map((tag) => tag.raw))]);
+
+    console.log("Interested Targets");
+    console.log([...new Set(filteredInterestedTargetsEmbeddingFlat.map((target) => target.raw))]);
+
+    console.log("Not Interested Tags");
+    console.log([...new Set(filteredNotInterestedTagsFilteredEmbeddingFilteredFlat)]);
+
+    console.log("Not Interested Targets");
+    console.log([...new Set(filteredNotInterestedTargetsFilteredEmbeddingFilteredFlat)]);
+}
+
+userInterest();
