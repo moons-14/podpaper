@@ -1,156 +1,189 @@
 import Parser from 'rss-parser';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import "dotenv/config";
-import { generateObject } from "ai"
-import z from "zod";
-import { getEmbedding, EmbeddingIndex } from 'client-vector-search';
-import search from "arXiv-api-ts";
+import { embed, embedMany, generateObject, cosineSimilarity } from "ai"
+import { z } from "zod";
+import { createOpenAI } from '@ai-sdk/openai';
+
+import fs from "fs";
 
 const google = createGoogleGenerativeAI({
     baseURL: process.env.AI_STUDIO_BASE_URL,
     apiKey: process.env.AI_STUDIO_API_KEY,
 });
 
+const openai = createOpenAI({
+    baseURL: process.env.OPENAI_BASE_URL,
+    apiKey: process.env.OPENAI_API_KEY,
+})
+
+const timeFilterMS = 1000 * 60 * 60 * 24 * 3; // 1.5 day
+
 const parser = new Parser<{
     feedUrl: string,
-    paginationLinks: {
-        self: string,
-    },
     title: string,
-    description: string,
-    pubDate: string,
-    managingEditor: string,
-    link: string,
-    language: string,
     lastBuildDate: string,
-    docs: string,
-    skipDays: {
-        day: string[],
-    }
+    link: string,
 }, {
-    creator: string,
-    rights: string,
     title: string,
     link: string,
     pubDate: string,
-    "dc:creator": string,
-    content: string,
-    contentSnippet: string,
-    guid: string,
-    categories: string[],
+    author: string,
+    summary: string,
+    id: string,
     isoDate: string,
 }>();
 
 const allCategories = [
-    'astro-ph',
-    'cond-mat',
     'cs',
     'econ',
     'eess',
-    'gr-qc',
-    'hep-ex',
-    'hep-lat',
-    'hep-ph',
-    'hep-th',
     'math',
-    'math-ph',
+    'astro-ph',
+    'cond-mat',
+    'gr-qc', // *無し
+    'hep-ex', // *無し
+    'hep-lat', // *無し
+    'hep-ph',  // *無し
+    'hep-th', // *無し
+    'math-ph', // *無し
     'nlin',
-    'nucl-ex',
-    'nucl-th',
+    'nucl-ex', // *無し
+    'nucl-th', // *無し
     'physics',
+    'quant-ph', // *無し
     'q-bio',
     'q-fin',
-    'quant-ph',
     'stat'
 ]
 
-// 推奨スコアを算出するための補助関数：コサイン類似度の計算
-const cosineSimilarity = (a: number[], b: number[]): number => {
-    const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
-    const normA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-    const normB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-    return dotProduct / (normA * normB);
-};
+const categoryQuery = "(cat:cs.* OR cat:econ.* OR cat:eess.* OR cat:math.* OR cat:astro-ph.* OR cat:cond-mat.* OR cat:gr-qc OR cat:hep-ex OR cat:hep-lat OR cat:hep-ph OR cat:hep-th OR cat:math-ph OR cat:nlin.* OR cat:nucl-ex OR cat:nucl-th OR cat:physics.* OR cat:quant-ph OR cat:q-bio.* OR cat:q-fin.* OR cat:stat.*)"
+
+
 
 const getAllPaper = async () => {
 
+    // papers.jsonがあるなら
+    if (fs.existsSync("./papers.json")) {
+        const papers = JSON.parse(fs.readFileSync("./papers.json").toString());
+        return papers;
+    }
+
     const papers: {
-        creator: string[],
-        rights: string,
+        author: string,
         title: string,
         link: string,
+        summary: string,
+        id: string,
+        isoDate: string,
         pubDate: Date,
-        content: string,
-        guid: string,
-        categories: string[]
     }[] = [];
 
-    for (const category of allCategories) {
-        const feed = await parser.parseURL(`https://rss.arxiv.org/rss/${category}`);
 
-        for (const item of feed.items) {
-            const creator = item.creator.split(', ');
-            const rights = item.rights;
-            const title = item.title;
-            const link = item.link;
-            const pubDate = new Date(item.pubDate);
-            const content = item.content;
-            const guid = item.guid;
-            const categories = item.categories;
+    // https://export.arxiv.org/api/query?search_query=au:del_maestro&submittedDate:[YYYYMMDDTTTT+TO+YYYYMMDDTTTT]
 
+    // submittedDateはアメリカ東部時間ESTで指定する
+    // 現在の時刻-timeFilterMSから現在の時刻までの論文を取得
+    const now = new Date();
+    const from = new Date(now.getTime() - timeFilterMS);
+    from.setHours(from.getHours() - 5);
+    now.setHours(now.getHours() - 5);
+    const fromStr = `${from.getFullYear()}${String(from.getMonth() + 1).padStart(2, "0")}${String(from.getDate()).padStart(2, "0")}0000`;
+    const nowStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}0000`;
+    const submittedDate = `[${fromStr}+TO+${nowStr}]`;
 
+    const search_query = `${encodeURIComponent(categoryQuery)}+AND+submittedDate:${submittedDate}`;
 
+    while (true) {
+
+        const url = `https://export.arxiv.org/api/query?search_query=${search_query}&max_results=500&start=${papers.length}`;
+
+        console.log(url);
+        const paper = await parser.parseURL(url);
+
+        console.log(paper.items.length, papers.length + 1);
+
+        if (paper.items.length === 0) {
+            break;
+        }
+
+        for (const item of paper.items) {
             papers.push({
-                creator,
-                rights,
-                title,
-                link,
-                pubDate,
-                content,
-                guid,
-                categories,
+                author: item.author,
+                title: item.title,
+                link: item.link,
+                summary: item.summary,
+                id: item.id,
+                isoDate: item.isoDate,
+                pubDate: new Date(item.isoDate),
             });
         }
+
     }
+
+
+    // ./papers.jsonに保存
+    fs.writeFileSync("./papers.json", JSON.stringify(papers, null, 2));
 
     return papers;
 }
 
+const getGoogleEmbedding = async (text: string[]) => {
+    const { embeddings } = await embedMany({
+        model: google.textEmbeddingModel("text-embedding-004"),
+        values: text
+    })
+
+    return embeddings.map((embedding, index) => {
+        return {
+            text: text[index],
+            embedding: embedding
+        }
+    });
+}
+
 const userMetadata = {
     role: ['web engineer', 'llm engineer', 'hight shool student'],
-    interest: ['machine learning', 'web development', 'cryptography', 'IoT'],
+    interest: ['machine learning', 'web development', 'cryptography', 'IoT', 'blockchain', 'social engineering'],
 }
 
 const main = async () => {
     const papers = await getAllPaper();
 
+    // ロールと興味の埋め込みを取得
+    const roleAndInterestEmbedding = await getGoogleEmbedding([...userMetadata.role, ...userMetadata.interest]);
+
     const userEmbedMetadata = {
         role: {
             raw: userMetadata.role,
-            embedding: await Promise.all(userMetadata.role.map((role) => getEmbedding(role)))
+            embedding: roleAndInterestEmbedding.filter((item) => userMetadata.role.includes(item.text)).map((item) => item.embedding)
         },
         interest: {
             raw: userMetadata.interest,
-            embedding: await Promise.all(userMetadata.interest.map((interest) => getEmbedding(interest)))
+            embedding: roleAndInterestEmbedding.filter((item) => userMetadata.interest.includes(item.text)).map((item) => item.embedding)
         }
     }
 
-    const pickupIndex = [20, 42, 52, 224, 612, 432, 687, 3, 78, 33]
-    // const randomPapers = papers.sort(() => Math.random() - 0.5).slice(0, 10);
-    const randomPapers = papers.filter((_, index) => pickupIndex.includes(index));
+    // const pickupIndex = [20, 42, 52, 224, 612, 432, 687, 3, 78, 33]
+    // // const randomPapers = papers.sort(() => Math.random() - 0.5).slice(0, 10);
+    // const randomPapers = papers.filter((_, index) => pickupIndex.includes(index));
+
+    let inputToken = 0;
+    let outputToken = 0;
+
+    const embeddingRequests = new Set<string>();
 
 
-    console.log("all papers", randomPapers.length);
+    console.log("all papers", papers.length);
 
     const paperMetadataList: {
-        creator: string[],
-        rights: string,
+        author: string,
         title: string,
         link: string,
+        summary: string,
+        id: string,
+        isoDate: string,
         pubDate: Date,
-        content: string,
-        guid: string,
-        categories: string[],
         tags: {
             raw: string[],
             embedding: number[][]
@@ -164,63 +197,126 @@ const main = async () => {
             embedding: number[]
         },
         type: string,
-        finalScore: number
+        finalScore: number,
+        debug:{
+            topicScore: number,
+            targetScore: number,
+            tagScore: number,
+            topicSimilarities: number[],
+            targetScores: number[],
+            tagScores: number[],
+        }
     }[] = [];
 
-    for (const paper of randomPapers) {
-        const result = await generateObject({
-            model: google("gemini-2.0-flash", {
-                structuredOutputs: false,
-            }),
-            schema: z.object({
-                tags: z.array(z.string()),
-                target: z.array(z.string()),
-                topic: z.string(),
-                type: z.enum(["empirical", "theoretical", "literature", "experimental", "simulation"]),
-            }),
-            prompt: `Please analyze the content based on the names and summaries of the following papers and generate JSON with meta-information.
+    await Promise.all(papers.map(async (paper) => {
+        try {
+            const result = await generateObject({
+                model: google("gemini-2.0-flash", {
+                    structuredOutputs: true,
+                }),
+                schema: z.object({
+                    tags: z.array(z.string()).describe("Please tag words that are important in the paper and that categorize the paper."),
+                    target: z.array(z.string()).describe("Please output the professions that will be most affected by this paper. E.g.) web engineer, infrastructure engineer, janitor"),
+                    topic: z.string().describe("Please list the single most important topic in the paper."),
+                    type: z.enum(["empirical", "theoretical", "literature", "experimental", "simulation"]).describe("Please indicate whether the paper is an empirical study/ theoretical study/ literature review/ experimental study/simulation."),
+                }),
+                prompt: `Please analyze the content based on the names and summaries of the following papers and generate JSON with meta-information.
 
 # Instructions
-Based on the information in the following papers, please summarize the tags, targets, keywords, topics, and types of papers.
-The instructions for each type of information are as follows
-- Tags: Please tag words that are important in the paper and that categorize the paper.
-- Target: Please output the professions that will be most affected by this paper. E.g.) web engineer, infrastructure engineer, janitor
-- Topic: Please list the single most important topic in the paper.
-- Type of paper: Please indicate whether the paper is an empirical study/ theoretical study/ literature review/ experimental study/simulation.
+Based on the information in the following papers, please summarize the tags, targets, keywords, topics, and types of papers. Please output the results in JSON format.
+Each tag, target, and topic should be assigned a simple, short, precise word.
 
 ## Article Title.
 ${paper.title}
 
 ## Abstract of the paper
-${paper.content}`,
-        });
+${paper.summary}`,
+            });
 
-        const paperMetadata = {
-            ...paper,
-            tags: {
-                raw: result.object.tags,
-                embedding: await Promise.all(result.object.tags.map((tag) => getEmbedding(tag)))
-            },
-            target: {
-                raw: result.object.target,
-                embedding: await Promise.all(result.object.target.map((target) => getEmbedding(target)))
-            },
-            topic: {
-                raw: result.object.topic,
-                embedding: await getEmbedding(result.object.topic)
-            },
-            type: result.object.type,
+            for (const tag of result.object.tags) {
+                embeddingRequests.add(tag);
+            }
+
+            for (const target of result.object.target) {
+                embeddingRequests.add(target);
+            }
+
+            embeddingRequests.add(result.object.topic);
+
+
+
+            const paperMetadata = {
+                ...paper,
+                tags: {
+                    raw: result.object.tags,
+                },
+                target: {
+                    raw: result.object.target,
+                },
+                topic: {
+                    raw: result.object.topic,
+                },
+                type: result.object.type,
+            }
+
+            paperMetadataList.push({
+                ...paperMetadata
+            });
+
+            inputToken += result.usage.promptTokens;
+            outputToken += result.usage.completionTokens;
+            console.log(`Input tokens: ${inputToken}`);
+            console.log(`Output tokens: ${outputToken}`);
+
+            const progress = Math.round((paperMetadataList.length / papers.length) * 100);
+            console.log(`LLM Progress: ${progress}% (${paperMetadataList.length}/${papers.length})`);
+
+        } catch (e) {
+            console.log(e);
         }
+    }));
+
+    // embeddingを取得する必要があるすべての文字列を一つの配列にまとめる
+    const allEmbeddingRequests = Array.from(embeddingRequests);
+
+    console.log("all embedding requests", allEmbeddingRequests.length);
+    const embeddings: {
+        text: string;
+        embedding: number[];
+    }[] = [];
+    // Create chunks of 100 items
+    const chunks = Array.from({ length: Math.ceil(allEmbeddingRequests.length / 100) }, (_, i) => 
+        allEmbeddingRequests.slice(i * 100, (i + 1) * 100)
+    );
+
+    console.log("all chunks", chunks.length);
+
+    // Process all chunks in parallel
+    const embeddingResults = await Promise.all(
+        chunks.map(async (chunk, index) => {
+            const result = await getGoogleEmbedding(chunk);
+            console.log(`Embedding Progress: ${Math.round(((index + 1) * 100 / chunks.length))}% (${(index + 1) * 100}/${allEmbeddingRequests.length})`);
+            return result;
+        })
+    );
+
+    // Flatten results into single array
+    embeddings.push(...embeddingResults.flat());
+
+    await Promise.all(paperMetadataList.map(async (paperMetadata) => {
+        paperMetadata.tags.embedding = paperMetadata.tags.raw.map(tag => embeddings.find(embedding => embedding.text === tag)?.embedding || []);
+        paperMetadata.target.embedding = paperMetadata.target.raw.map(target => embeddings.find(embedding => embedding.text === target)?.embedding || []);
+        paperMetadata.topic.embedding = embeddings.find(embedding => embedding.text === paperMetadata.topic.raw)?.embedding || [];
 
         // 重みパラメータ（topicが最も重要）
-        const TOPIC_WEIGHT = 3.0;
-        const TARGET_WEIGHT = 2.5;
-        const TAG_WEIGHT = 2.0;
+        const TOPIC_WEIGHT = 4.0;
+        const TARGET_WEIGHT = 2.0;
+        const TAG_WEIGHT = 2.8;
 
         // 閾値（この値未満の類似度は無視する）
-        const TOPIC_THRESHOLD = 0.8;
-        const TARGET_THRESHOLD = 0.75;
-        const TAG_THRESHOLD = 0.75;
+        const TOPIC_THRESHOLD = 0.7;
+        const TARGET_THRESHOLD = 0.6;
+        const TAG_THRESHOLD = 0.6;
 
         // ---------------------- レコメンデーションアルゴリズム ----------------------
         // 以下は、paperMetadataに含まれる埋め込み情報（tags, target, topic）と
@@ -267,20 +363,92 @@ ${paper.content}`,
         console.log(`- Tags score: ${tagScore.toFixed(3)}`);
         console.log(`=> Final recommendation score: ${finalScore.toFixed(3)}`);
 
-        paperMetadataList.push({
-            ...paperMetadata,
-            finalScore
-        });
+        paperMetadata.finalScore = finalScore;
+        paperMetadata.debug = {
+            topicScore,
+            targetScore,
+            tagScore,
+            topicSimilarities,
+            targetScores,
+            tagScores,
+        }
 
-        const progress = Math.round((paperMetadataList.length / randomPapers.length) * 100);
-        console.log(`Progress: ${progress}% (${paperMetadataList.length}/${randomPapers.length})`);
-    }
+        console.log(`Input tokens: ${inputToken}`);
+        console.log(`Output tokens: ${outputToken}`);
+
+        const progress = Math.round((paperMetadataList.length / papers.length) * 100);
+        console.log(`Score Progress: ${progress}% (${paperMetadataList.length}/${papers.length})`);
+
+    }));
 
     // 最終スコアでソート
     paperMetadataList.sort((a, b) => b.finalScore - a.finalScore);
 
     console.log("Recommended papers:");
     console.log(paperMetadataList.map(paper => `- ${paper.title} (Score: ${paper.finalScore.toFixed(3)})`));
+
+    console.log("ALL Input tokens: ", inputToken);
+    console.log("ALL Output tokens: ", outputToken);
+
+    fs.writeFileSync("./result.json", JSON.stringify(paperMetadataList, null, 2));
+
 }
 
 main();
+
+const test = async () => {
+    // machine learningをembedding
+    const machineLearningEmbedding = (await getGoogleEmbedding(["machine learning"]))[0].embedding;
+
+    // web developmentをembedding
+    const webDevelopmentEmbedding = (await getGoogleEmbedding(["web development"]))[0].embedding;
+
+    // LLMをembedding
+    const llmEmbedding = (await getGoogleEmbedding(["llm"]))[0].embedding;
+
+    // hight shool studentをembedding
+    const hightShoolStudentEmbedding = (await getGoogleEmbedding(["hight shool student"]))[0].embedding;
+
+    // pattern matching をembedding
+    const patternMatchingEmbedding = (await getGoogleEmbedding(["pattern matching"]))[0].embedding;
+
+    // social engineering をembedding
+    const socialEngineeringEmbedding = (await getGoogleEmbedding(["social engineering"]))[0].embedding;
+
+    // cryptography をembedding
+    const cryptographyEmbedding = (await getGoogleEmbedding(["cryptography"]))[0].embedding;
+
+    // IoT をembedding
+    const IoTEmbedding = (await getGoogleEmbedding(["IoT"]))[0].embedding;
+
+    // machine learningとweb developmentの類似度をconsole.log
+    console.log("machine learningとweb developmentの類似度", cosineSimilarity(machineLearningEmbedding, webDevelopmentEmbedding));
+    console.log("machine learningとllmの類似度", cosineSimilarity(machineLearningEmbedding, llmEmbedding));
+    console.log("machine learningとhight shool studentの類似度", cosineSimilarity(machineLearningEmbedding, hightShoolStudentEmbedding));
+    console.log("machine learningとpattern matchingの類似度", cosineSimilarity(machineLearningEmbedding, patternMatchingEmbedding));
+    console.log("machine learningとsocial engineeringの類似度", cosineSimilarity(machineLearningEmbedding, socialEngineeringEmbedding));
+    console.log("machine learningとcryptographyの類似度", cosineSimilarity(machineLearningEmbedding, cryptographyEmbedding));
+    console.log("machine learningとIoTの類似度", cosineSimilarity(machineLearningEmbedding, IoTEmbedding));
+
+    // 類似度の順番でソートしてconsole.log
+    const similarityList = [
+        { name: "web development", embedding: webDevelopmentEmbedding },
+        { name: "llm", embedding: llmEmbedding },
+        { name: "hight shool student", embedding: hightShoolStudentEmbedding },
+        { name: "pattern matching", embedding: patternMatchingEmbedding },
+        { name: "social engineering", embedding: socialEngineeringEmbedding },
+        { name: "cryptography", embedding: cryptographyEmbedding },
+        { name: "IoT", embedding: IoTEmbedding },
+    ].map((item) => ({
+        name: item.name,
+        similarity: cosineSimilarity(machineLearningEmbedding, item.embedding)
+    })).sort((a, b) => b.similarity - a.similarity);
+
+    console.log("machine learningと他の興味の類似度ランキング");
+
+    similarityList.forEach((item, index) => {
+        console.log(`${index + 1}. ${item.name}: ${item.similarity}`);
+    });
+}
+
+// test();
