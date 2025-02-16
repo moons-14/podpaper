@@ -143,15 +143,16 @@ const getGoogleEmbedding = async (text: string[]) => {
 }
 
 const userMetadata = {
-    role: ['web engineer', 'llm engineer', 'hight shool student'],
-    interest: ['machine learning', 'web development', 'cryptography', 'IoT', 'blockchain', 'social engineering'],
+    role: ['blockchain engineer', 'web developer', 'data scientist'],
+    interest: ['cryptography', 'zk', 'blockchain', "machine learning", "LLM", "healthcare", "social engineering", "IoT"],
+    notInterest: ['biology', 'geology']
 }
 
 const main = async () => {
     const papers = await getAllPaper();
 
     // ロールと興味の埋め込みを取得
-    const roleAndInterestEmbedding = await getGoogleEmbedding([...userMetadata.role, ...userMetadata.interest]);
+    const roleAndInterestEmbedding = await getGoogleEmbedding([...userMetadata.role, ...userMetadata.interest, ...userMetadata.notInterest]);
 
     const userEmbedMetadata = {
         role: {
@@ -161,6 +162,10 @@ const main = async () => {
         interest: {
             raw: userMetadata.interest,
             embedding: roleAndInterestEmbedding.filter((item) => userMetadata.interest.includes(item.text)).map((item) => item.embedding)
+        },
+        notInterest: {
+            raw: userMetadata.notInterest,
+            embedding: roleAndInterestEmbedding.filter((item) => userMetadata.notInterest.includes(item.text)).map((item) => item.embedding)
         }
     }
 
@@ -205,6 +210,8 @@ const main = async () => {
             tagScores: number[],
             targetScores: number[],
             topicSimilarities: number[],
+            notInterestScore: number,
+            notInterestScores: number[],
         }
     }[] = [];
 
@@ -312,6 +319,7 @@ ${paper.summary}`,
         const TOPIC_WEIGHT = 4.0;
         const TARGET_WEIGHT = 2.0;
         const TAG_WEIGHT = 3.0;
+        const NOT_INTEREST_WEIGHT = 1.0;
 
         // 閾値（この値未満の類似度は無視する）
         const TOPIC_THRESHOLD = 0.35;
@@ -361,13 +369,28 @@ ${paper.summary}`,
         });
         const tagScore = tagScores.reduce((sum, score) => sum + score, 0) / tagScores.length;
 
+        // 4. NotInterestの類似度
+        //    論文のtags（タグ）の各埋め込みと、ユーザーの「notInterest」埋め込みとの類似度を計算し、
+        //    各notInterestに対して最高の類似度を求めた後、全体として平均のスコアを採用します。
+        const notInterestScores = paperMetadata.tags.embedding.map(paperTagEmbed => {
+            const sims = userEmbedMetadata.notInterest.embedding.map(userNotInterestEmbed => {
+                const similarity = cosineSimilarity(paperTagEmbed, userNotInterestEmbed)
+                if (similarity < TAG_THRESHOLD) return 0;
+                return similarity;
+            }
+            );
+            return Math.max(...sims);
+        });
+        const notInterestScore = notInterestScores.reduce((sum, score) => sum + score, 0) / notInterestScores.length;
+
         // 4. 最終スコアの算出（各要素に重みをかけて合算）
-        const finalScore = TOPIC_WEIGHT * topicScore + TARGET_WEIGHT * targetScore + TAG_WEIGHT * tagScore;
+        const finalScore = TOPIC_WEIGHT * topicScore + TARGET_WEIGHT * targetScore + TAG_WEIGHT * tagScore - NOT_INTEREST_WEIGHT * notInterestScore;
 
         console.log(`Paper: ${paperMetadata.title}`);
         console.log(`- Topic score: ${topicScore.toFixed(3)}`);
         console.log(`- Target score: ${targetScore.toFixed(3)}`);
         console.log(`- Tags score: ${tagScore.toFixed(3)}`);
+        console.log(`- NotInterest score: ${notInterestScore.toFixed(3)}`);
         console.log(`=> Final recommendation score: ${finalScore.toFixed(3)}`);
 
         paperMetadata.finalScore = finalScore;
@@ -378,6 +401,8 @@ ${paper.summary}`,
             tagScores,
             targetScores,
             topicSimilarities,
+            notInterestScore,
+            notInterestScores,
         }
 
         console.log(`Input tokens: ${inputToken}`);
