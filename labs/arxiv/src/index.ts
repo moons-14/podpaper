@@ -198,13 +198,13 @@ const main = async () => {
         },
         type: string,
         finalScore: number,
-        debug:{
-            topicScore: number,
-            targetScore: number,
+        debug: {
             tagScore: number,
-            topicSimilarities: number[],
-            targetScores: number[],
+            targetScore: number,
+            topicScore: number,
             tagScores: number[],
+            targetScores: number[],
+            topicSimilarities: number[],
         }
     }[] = [];
 
@@ -285,7 +285,7 @@ ${paper.summary}`,
         embedding: number[];
     }[] = [];
     // Create chunks of 100 items
-    const chunks = Array.from({ length: Math.ceil(allEmbeddingRequests.length / 100) }, (_, i) => 
+    const chunks = Array.from({ length: Math.ceil(allEmbeddingRequests.length / 100) }, (_, i) =>
         allEmbeddingRequests.slice(i * 100, (i + 1) * 100)
     );
 
@@ -311,12 +311,12 @@ ${paper.summary}`,
         // 重みパラメータ（topicが最も重要）
         const TOPIC_WEIGHT = 4.0;
         const TARGET_WEIGHT = 2.0;
-        const TAG_WEIGHT = 2.8;
+        const TAG_WEIGHT = 3.0;
 
         // 閾値（この値未満の類似度は無視する）
-        const TOPIC_THRESHOLD = 0.7;
-        const TARGET_THRESHOLD = 0.6;
-        const TAG_THRESHOLD = 0.6;
+        const TOPIC_THRESHOLD = 0.35;
+        const TARGET_THRESHOLD = 0.35;
+        const TAG_THRESHOLD = 0.35;
 
         // ---------------------- レコメンデーションアルゴリズム ----------------------
         // 以下は、paperMetadataに含まれる埋め込み情報（tags, target, topic）と
@@ -324,35 +324,42 @@ ${paper.summary}`,
         // 計算し、重み付けして最終的なスコアを算出する処理例です。
 
         // 1. Topicの類似度
-        //    論文のtopic埋め込みと、ユーザーの「interest」埋め込みそれぞれのコサイン類似度を計算し、最大値を採用します。
-        const topicSimilarities = userEmbedMetadata.interest.embedding.map(userInterestEmbed =>
-            cosineSimilarity(paperMetadata.topic.embedding, userInterestEmbed)
+        //    論文のtopic埋め込みと、ユーザーの「interest」埋め込みそれぞれのコサイン類似度を計算し、平均値を採用します。
+        const topicSimilarities = userEmbedMetadata.interest.embedding.map(userInterestEmbed => {
+            const similarity = cosineSimilarity(paperMetadata.topic.embedding, userInterestEmbed)
+            if (similarity < TOPIC_THRESHOLD) return 0;
+            return similarity;
+        }
         );
-        let topicScore = Math.max(...topicSimilarities);
-        if (topicScore < TOPIC_THRESHOLD) topicScore = 0;
+        const topicScore = topicSimilarities.reduce((sum, score) => sum + score, 0) / topicSimilarities.length;
 
         // 2. Targetの類似度
         //    論文のtarget（職業候補）の各埋め込みと、ユーザーの「role」埋め込みとの類似度を計算し、
         //    各targetに対して最高の類似度を求めた後、全体として平均のスコアを採用します。
         const targetScores = paperMetadata.target.embedding.map(paperTargetEmbed => {
-            const sims = userEmbedMetadata.role.embedding.map(userRoleEmbed =>
-                cosineSimilarity(paperTargetEmbed, userRoleEmbed)
+            const sims = userEmbedMetadata.role.embedding.map(userRoleEmbed => {
+                const similarity = cosineSimilarity(paperTargetEmbed, userRoleEmbed)
+                if (similarity < TARGET_THRESHOLD) return 0;
+                return similarity;
+            }
             );
             return Math.max(...sims);
         });
-        let targetScore = targetScores.reduce((sum, score) => sum + score, 0) / targetScores.length;
-        if (targetScore < TARGET_THRESHOLD) targetScore = 0;
+        const targetScore = targetScores.reduce((sum, score) => sum + score, 0) / targetScores.length;
 
         // 3. Tagsの類似度
-        //    論文のtagsの各埋め込みと、ユーザーの「interest」埋め込みとの類似度を計算し、
-        //    すべての組み合わせの中で平均を採用します。
-        const tagScores = paperMetadata.tags.embedding.flatMap(tagEmbed =>
-            userEmbedMetadata.interest.embedding.map(userInterestEmbed =>
-                cosineSimilarity(tagEmbed, userInterestEmbed)
-            )
-        );
-        let tagScore = tagScores.reduce((sum, score) => sum + score, 0) / tagScores.length;
-        if (tagScore < TAG_THRESHOLD) tagScore = 0;
+        //    論文のtags（タグ）の各埋め込みと、ユーザーの「interest」埋め込みとの類似度を計算し、
+        //    各interestに対して最高の類似度を求めた後、全体として平均のスコアを採用します。
+        const tagScores = paperMetadata.tags.embedding.map(paperTagEmbed => {
+            const sims = userEmbedMetadata.interest.embedding.map(userInterestEmbed => {
+                const similarity = cosineSimilarity(paperTagEmbed, userInterestEmbed)
+                if (similarity < TAG_THRESHOLD) return 0;
+                return similarity;
+            }
+            );
+            return Math.max(...sims);
+        });
+        const tagScore = tagScores.reduce((sum, score) => sum + score, 0) / tagScores.length;
 
         // 4. 最終スコアの算出（各要素に重みをかけて合算）
         const finalScore = TOPIC_WEIGHT * topicScore + TARGET_WEIGHT * targetScore + TAG_WEIGHT * tagScore;
@@ -365,12 +372,12 @@ ${paper.summary}`,
 
         paperMetadata.finalScore = finalScore;
         paperMetadata.debug = {
-            topicScore,
-            targetScore,
             tagScore,
-            topicSimilarities,
-            targetScores,
+            targetScore,
+            topicScore,
             tagScores,
+            targetScores,
+            topicSimilarities,
         }
 
         console.log(`Input tokens: ${inputToken}`);
@@ -390,7 +397,15 @@ ${paper.summary}`,
     console.log("ALL Input tokens: ", inputToken);
     console.log("ALL Output tokens: ", outputToken);
 
-    fs.writeFileSync("./result.json", JSON.stringify(paperMetadataList, null, 2));
+    fs.writeFileSync("./result.json", JSON.stringify(paperMetadataList.map(v => {
+        // embeddingを削除
+        return {
+            ...v,
+            tags: v.tags.raw,
+            target: v.target.raw,
+            topic: v.topic.raw,
+        }
+    }), null, 2));
 
 }
 
