@@ -28,7 +28,8 @@
   "homepage": "https://github.com/moons-14/podpaper#readme",
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
-    "turbo": "^2.4.2"
+    "turbo": "^2.4.2",
+    "@types/node": "^18.19.1"
   },
   "packageManager": "pnpm@9.14.4"
 }

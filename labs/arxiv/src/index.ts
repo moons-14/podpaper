@@ -143,11 +143,11 @@ const getGoogleEmbedding = async (text: string[]) => {
     });
 }
 
-const userMetadata = {
-    role: ['blockchain engineer', 'web developer', 'data scientist'],
-    interest: ['cryptography', 'zk', 'blockchain', "machine learning", "LLM", "healthcare", "social engineering", "IoT"],
-    notInterest: ['biology', 'geology']
-}
+// const userMetadata = {
+//     role: ['blockchain engineer', 'web developer', 'data scientist'],
+//     interest: ['cryptography', 'zk', 'blockchain', "machine learning", "LLM", "healthcare", "social engineering", "IoT"],
+//     notInterest: ['biology', 'geology']
+// }
 
 const getPaperMetadata = async (title: string, summary: string) => {
     const result = await generateObject({
@@ -176,7 +176,11 @@ ${summary}`,
     return result.object;
 }
 
-const main = async () => {
+const main = async (userMetadata: {
+    role: string[],
+    interest: string[],
+    notInterest: string[]
+}) => {
     const papers = await getAllPaper();
 
     // ロールと興味の埋め込みを取得
@@ -896,6 +900,14 @@ const userInterest = async () => {
 
     console.log("Not Interested Targets");
     console.log([...new Set(filteredNotInterestedTargetsFilteredEmbeddingFilteredFlat)]);
+
+    console.log("========PICKUP PAPER ========");
+
+    main({
+        role: filteredInterestedTargetsEmbeddingFlat.map((target) => target.raw),
+        interest: filteredInterestedTagsEmbeddingFlat.map((tag) => tag.raw),
+        notInterest: filteredNotInterestedTagsFilteredEmbeddingFilteredFlat
+    })
 }
 
 userInterest();
