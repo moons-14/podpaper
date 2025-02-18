@@ -1,0 +1,1 @@
+export const sigmoid = (x: number, k = 1): number => 1 / (1 + Math.exp(-k * x));
