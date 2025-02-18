@@ -91,6 +91,7 @@ const updateEmbeddingItems = (
         );
 
         let shouldAddItem = true;
+        let weightRelated = 1;
 
         for (const [index, similarity] of similarityList.entries()) {
             if (similarity.similarity > thresholdMatch) {
@@ -102,13 +103,16 @@ const updateEmbeddingItems = (
             if (similarity.similarity > thresholdRelated) {
                 // 関連度がそこそこあるならちょっとだけ重みを強める
                 existingItems[index].weight *= weightRelated;
-                shouldAddItem = false;
+                weightRelated *= weightRelated;
                 break;
             }
         }
 
         if (shouldAddItem) {
-            existingItems.push(item);
+            existingItems.push({
+                ...item,
+                weight: weightRelated
+            });
         }
     }
 }
@@ -239,7 +243,7 @@ const askSortedQuestions = async (aiTools: AITools, questionCount: number, langu
 
         const sortedPapers = sortPapers(scoredPapers);
 
-        const questionPapers = sortedPapers.slice(0, Math.ceil(sortedPapers.length / 4 * 3));
+        const questionPapers = sortedPapers.slice(0, Math.ceil(sortedPapers.length / 4));
 
         const randomPaper = questionPapers[Math.floor(Math.random() * questionPapers.length)];
 
@@ -271,9 +275,9 @@ const main = async () => {
 
     const aiTools = new AITools(process.env.AI_STUDIO_API_KEY || "", process.env.AI_STUDIO_BASE_URL);
 
-    // const userMetadata = await askRandomQuestions(aiTools, askConfig.questionCount.random, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS);
+    const userMetadata = await askRandomQuestions(aiTools, askConfig.questionCount.random, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS);
 
-    const userMetadata = await getUserMetadata();
+    // const userMetadata = await getUserMetadata();
 
     if (!userMetadata) return;
 

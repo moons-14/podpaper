@@ -48,8 +48,8 @@ export const askConfig: {
     }
 } = {
     questionCount:{
-        random: 6,
-        sorted: 6
+        random: 20,
+        sorted: 5
     },
     language: "ja",
     timeFilterMS: 1000 * 60 * 60 * 24 * 4, // 4 day
