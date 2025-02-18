@@ -18,7 +18,7 @@ const openai = createOpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 })
 
-const timeFilterMS = 1000 * 60 * 60 * 24 * 3; // 1.5 day
+const timeFilterMS = 1000 * 60 * 60 * 24 * 4; // 1.5 day
 
 const parser = new Parser<{
     feedUrl: string,
@@ -143,11 +143,11 @@ const getGoogleEmbedding = async (text: string[]) => {
     });
 }
 
-// const userMetadata = {
-//     role: ['blockchain engineer', 'web developer', 'data scientist'],
-//     interest: ['cryptography', 'zk', 'blockchain', "machine learning", "LLM", "healthcare", "social engineering", "IoT"],
-//     notInterest: ['biology', 'geology']
-// }
+const userMetadata = {
+    role: ['blockchain engineer', 'web developer', 'data scientist'],
+    interest: ['cryptography', 'zk', 'blockchain', "machine learning", "LLM", "healthcare", "social engineering", "IoT"],
+    notInterest: ['biology', 'geology']
+}
 
 const getPaperMetadata = async (title: string, summary: string) => {
     const result = await generateObject({
@@ -910,4 +910,6 @@ const userInterest = async () => {
     })
 }
 
-userInterest();
+// userInterest();
+
+main(userMetadata);
