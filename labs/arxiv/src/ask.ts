@@ -11,8 +11,8 @@ import { getPapersMetadata } from './metadata/paper';
 import { getPapersMetadataEmbedding } from './embedding/paper';
 import { getUserMetadataEmbedding } from './embedding/user';
 import { getCosSimilarityMany } from './embedding/similarity';
-import { saveUserMetadata } from './metadata/user';
-import { scorePapers, sortPapers } from './score';
+import { getUserMetadata, saveUserMetadata } from './metadata/user';
+import { scorePapers, scorePapersMetadataEmbedding, sortPapers } from './score';
 
 // ユーザーの言語に翻訳する
 const translate = async (aiTools: AITools, text: string) => {
@@ -229,11 +229,13 @@ const askRandomQuestions = async (aiTools: AITools, questionCount: number, langu
 
 const askSortedQuestions = async (aiTools: AITools, questionCount: number, language: string, queryCategory: string, timeFilterMS: number, userMetadata: UserMetadata) => {
     const papers = await getArxivPapersWithCache(queryCategory, timeFilterMS);
+    const papersMetadata = await getPapersMetadata(aiTools, papers, userMetadata);
+    const papersMetadataEmbedding = await getPapersMetadataEmbedding(aiTools, papersMetadata);
 
     let currentMetadataEmbedding = await getUserMetadataEmbedding(aiTools, userMetadata);
 
     for (let i = 0; i < questionCount; i++) {
-        const scoredPapers = await scorePapers(aiTools, currentMetadataEmbedding, papers);
+        const scoredPapers = await scorePapersMetadataEmbedding(currentMetadataEmbedding, papersMetadataEmbedding);
 
         const sortedPapers = sortPapers(scoredPapers);
 
@@ -269,11 +271,13 @@ const main = async () => {
 
     const aiTools = new AITools(process.env.AI_STUDIO_API_KEY || "", process.env.AI_STUDIO_BASE_URL);
 
-    const userMetadata = await askRandomQuestions(aiTools, askConfig.questionCount, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS);
+    // const userMetadata = await askRandomQuestions(aiTools, askConfig.questionCount.random, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS);
+
+    const userMetadata = await getUserMetadata();
 
     if (!userMetadata) return;
 
-    await askSortedQuestions(aiTools, askConfig.questionCount, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS, userMetadata);
+    await askSortedQuestions(aiTools, askConfig.questionCount.sorted, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS, userMetadata);
 
     await saveUserMetadata(userMetadata);
 

@@ -31,7 +31,10 @@ export const recommendConfig: {
 }
 
 export const askConfig: {
-    questionCount: number
+    questionCount: {
+        random: number,
+        sorted: number
+    }
     language: string
     timeFilterMS: number
     queryCategory: string
@@ -44,7 +47,10 @@ export const askConfig: {
         related: number
     }
 } = {
-    questionCount: 6,
+    questionCount:{
+        random: 6,
+        sorted: 6
+    },
     language: "ja",
     timeFilterMS: 1000 * 60 * 60 * 24 * 4, // 4 day
     queryCategory: "cat:cs.* OR cat:econ.* OR cat:eess.* OR cat:math.* OR cat:astro-ph.* OR cat:cond-mat.* OR cat:gr-qc OR cat:hep-ex OR cat:hep-lat OR cat:hep-ph OR cat:hep-th OR cat:math-ph OR cat:nlin.* OR cat:nucl-ex OR cat:nucl-th OR cat:physics.* OR cat:quant-ph OR cat:q-bio.* OR cat:q-fin.* OR cat:stat.*",
