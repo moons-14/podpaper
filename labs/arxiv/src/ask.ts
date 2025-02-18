@@ -229,6 +229,29 @@ const askRandomQuestions = async (aiTools: AITools, questionCount: number, langu
     return currentUserMetadataEmbedding;
 }
 
+const genUserAttribute = async (aiTools: AITools, userMetadata: UserMetadata, language: string) => {
+    const { interest, notInterest } = userMetadata;
+
+    const interestTags = interest.tags.map(tag => tag.value);
+    const notInterestTags = notInterest.tags.map(tag => tag.value);
+
+    const interestTargets = interest.target.map(target => target.value);
+    const notInterestTargets = notInterest.target.map(target => target.value);
+
+    const result = await aiTools.genText(
+        `Create an analytical report by analogizing the user's likes and dislikes from the following tag attributes and their weights for the user's paper preferences.
+- User's interest tags: ${interestTags.join(", ")}
+- User's not interest tags: ${notInterestTags.join(", ")}
+- User's interest targets: ${interestTargets.join(", ")}
+- User's not interest targets: ${notInterestTargets.join(", ")}
+
+Output only the body of the analysis report.
+Please output language in "${language}"`
+    );
+
+    return result;
+}
+
 // 既存のユーザーメタデータを更新する
 
 const askSortedQuestions = async (aiTools: AITools, questionCount: number, language: string, queryCategory: string, timeFilterMS: number, userMetadata: UserMetadata) => {
@@ -287,4 +310,14 @@ const main = async () => {
 
 };
 
-main();
+// main();
+
+const main2 = async () => {
+    const aiTools = new AITools(process.env.AI_STUDIO_API_KEY || "", process.env.AI_STUDIO_BASE_URL);
+    const userMetadata = await getUserMetadata();
+    if (!userMetadata) return;
+    const doc = await genUserAttribute(aiTools, userMetadata, askConfig.language);
+    console.log(doc);
+}
+
+main2();
