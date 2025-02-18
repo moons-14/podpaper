@@ -24,5 +24,17 @@ export const saveUserMetadata = async (userMetadata: UserMetadata) => {
         fs.unlinkSync("./cache/user-metadata.json");
     }
 
-    fs.writeFileSync("./cache/user-metadata.json", JSON.stringify(userMetadata, null, 4));
+    // embeddingが含まれているなら除外する
+    const userMetadataWithoutEmbedding: UserMetadata = {
+        ...userMetadata,
+        interest: {
+            target: userMetadata.interest.target.map(v => ({ value: v.value, weight: v.weight })),
+            tags: userMetadata.interest.tags.map(v => ({ value: v.value, weight: v.weight })),
+        },
+        notInterest: {
+            target: userMetadata.notInterest.target.map(v => ({ value: v.value, weight: v.weight })),
+            tags: userMetadata.notInterest.tags.map(v => ({ value: v.value, weight: v.weight })),
+        }
+    }
+    fs.writeFileSync("./cache/user-metadata.json", JSON.stringify(userMetadataWithoutEmbedding, null, 4));
 }

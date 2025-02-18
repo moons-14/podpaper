@@ -5,12 +5,12 @@ import { getUserMetadataEmbedding } from "./embedding/user";
 import type { AITools } from "./libs/ai-tools";
 import { getPapersMetadata } from "./metadata/paper";
 import type { Paper, PaperMetadataWithScore } from "./types/paper";
-import type { UserMetadata } from "./types/user";
+import type { UserMetadata, UserMetadataEmbedding } from "./types/user";
 import { sigmoid } from "./utils/sigmoid";
 
 export const scorePapers = async (
     aiTools: AITools,
-    userMetadata: UserMetadata,
+    userMetadata: UserMetadata | UserMetadataEmbedding,
     papers: Paper[]
 ) => {
     console.debug("scoring papers...");

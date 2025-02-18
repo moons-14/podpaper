@@ -12,6 +12,7 @@ import { getPapersMetadataEmbedding } from './embedding/paper';
 import { getUserMetadataEmbedding } from './embedding/user';
 import { getCosSimilarityMany } from './embedding/similarity';
 import { saveUserMetadata } from './metadata/user';
+import { scorePapers, sortPapers } from './score';
 
 // ユーザーの言語に翻訳する
 const translate = async (aiTools: AITools, text: string) => {
@@ -226,9 +227,43 @@ const askRandomQuestions = async (aiTools: AITools, questionCount: number, langu
 
 // 既存のユーザーメタデータを更新する
 
-const askSortedQuestion = async (aiTools: AITools, language: string, queryCategory: string, timeFilterMS: number, userMetadata: UserMetadata) => {
+const askSortedQuestions = async (aiTools: AITools, questionCount: number, language: string, queryCategory: string, timeFilterMS: number, userMetadata: UserMetadata) => {
     const papers = await getArxivPapersWithCache(queryCategory, timeFilterMS);
- }
+
+    let currentMetadataEmbedding = await getUserMetadataEmbedding(aiTools, userMetadata);
+
+    for (let i = 0; i < questionCount; i++) {
+        const scoredPapers = await scorePapers(aiTools, currentMetadataEmbedding, papers);
+
+        const sortedPapers = sortPapers(scoredPapers);
+
+        const questionPapers = sortedPapers.slice(0, Math.ceil(sortedPapers.length / 4 * 3));
+
+        const randomPaper = questionPapers[Math.floor(Math.random() * questionPapers.length)];
+
+        const translatedPaper = await translatePapers(aiTools, [randomPaper], language);
+
+        const { interestPaper, notInterestPaper } = await askPaperPreference(translatedPaper[0]);
+
+        if (interestPaper) {
+            currentMetadataEmbedding = updateUserMetadataEmbedding(
+                currentMetadataEmbedding,
+                interestPaper,
+                true
+            );
+        }
+
+        if (notInterestPaper) {
+            currentMetadataEmbedding = updateUserMetadataEmbedding(
+                currentMetadataEmbedding,
+                notInterestPaper,
+                false
+            );
+        }
+    }
+
+    return currentMetadataEmbedding;
+}
 
 const main = async () => {
 
@@ -237,6 +272,8 @@ const main = async () => {
     const userMetadata = await askRandomQuestions(aiTools, askConfig.questionCount, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS);
 
     if (!userMetadata) return;
+
+    await askSortedQuestions(aiTools, askConfig.questionCount, askConfig.language, askConfig.queryCategory, askConfig.timeFilterMS, userMetadata);
 
     await saveUserMetadata(userMetadata);
 

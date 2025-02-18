@@ -5,6 +5,7 @@ import type { UserMetadata } from "./types/user";
 import { getArxivPapersWithCache } from "./libs/arxiv";
 import fs from 'node:fs';
 import { getUserMetadata } from "./metadata/user";
+import "dotenv/config";
 
 export const getRecommendedPapers = async (
     aiTools: AITools,
@@ -14,7 +15,6 @@ export const getRecommendedPapers = async (
 ) => {
     const papers = await getArxivPapersWithCache(queryCategory, timeFilterMS);
     const scoredPapers = await scorePapers(aiTools, userMetadata, papers);
-
 
     const sortedPapers = sortPapers(scoredPapers);
 
