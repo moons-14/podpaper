@@ -63,7 +63,7 @@ export const getArxivPapers = async (
 export const getArxivPapersWithCache = async (
     query: string,
     timeFilterMS: number
-) => {
+): Promise<Paper[]> => {
     if (!fs.existsSync("./cache")) {
         fs.mkdirSync("./cache");
     }

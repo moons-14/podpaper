@@ -1,4 +1,4 @@
-import { config } from "./config";
+import { recommendConfig } from "./config";
 import { getPapersMetadataEmbedding } from "./embedding/paper";
 import { getCombinedCosSimilarity } from "./embedding/similarity";
 import { getUserMetadataEmbedding } from "./embedding/user";
@@ -6,7 +6,6 @@ import type { AITools } from "./libs/ai-tools";
 import { getPapersMetadata } from "./metadata/paper";
 import type { Paper, PaperMetadataWithScore } from "./types/paper";
 import type { UserMetadata } from "./types/user";
-import { getArxivPapersWithCache } from "./utils/arxiv";
 import { sigmoid } from "./utils/sigmoid";
 
 export const scorePapers = async (
@@ -25,40 +24,45 @@ export const scorePapers = async (
             topic: getCombinedCosSimilarity(
                 [paper.topic.embedding],
                 userMetadataEmbedding.interest.tags.map(tag => tag.embedding),
-                config.threshold.interest
+                userMetadataEmbedding.interest.tags.map(tag => tag.weight),
+                recommendConfig.threshold.interest
             ),
             target: getCombinedCosSimilarity(
                 paper.target.map(target => target.embedding),
                 userMetadataEmbedding.interest.target.map(target => target.embedding),
-                config.threshold.interest
+                userMetadataEmbedding.interest.target.map(target => target.weight),
+                recommendConfig.threshold.interest
             ),
             tag: getCombinedCosSimilarity(
                 paper.tags.map(tag => tag.embedding),
                 userMetadataEmbedding.interest.tags.map(tag => tag.embedding),
-                config.threshold.interest
+                userMetadataEmbedding.interest.tags.map(tag => tag.weight),
+                recommendConfig.threshold.interest
             ),
             notInterestedTarget: getCombinedCosSimilarity(
                 paper.target.map(target => target.embedding),
                 userMetadataEmbedding.notInterest.target.map(target => target.embedding),
-                config.threshold.notInterest
+                userMetadataEmbedding.notInterest.target.map(target => target.weight),
+                recommendConfig.threshold.notInterest
             ),
             notInterestedTag: getCombinedCosSimilarity(
                 paper.tags.map(tag => tag.embedding),
                 userMetadataEmbedding.notInterest.tags.map(tag => tag.embedding),
-                config.threshold.notInterest
+                userMetadataEmbedding.notInterest.tags.map(tag => tag.weight),
+                recommendConfig.threshold.notInterest
             ),
         };
 
         // Basic weighted sum score (consider adjusting weights dynamically)
         const contentScore =
-            similarity.topic * config.weight.topic +
-            similarity.target * config.weight.target +
-            similarity.tag * config.weight.tag -
-            (similarity.notInterestedTarget + similarity.notInterestedTag) * config.weight.notInterest;
+            similarity.topic * recommendConfig.weight.topic +
+            similarity.target * recommendConfig.weight.target +
+            similarity.tag * recommendConfig.weight.tag -
+            (similarity.notInterestedTarget + similarity.notInterestedTag) * recommendConfig.weight.notInterest;
 
         const scaledRawScore = contentScore * 0.5;
 
-        const finalScore = sigmoid(scaledRawScore, config.sigmoid_k);
+        const finalScore = sigmoid(scaledRawScore, recommendConfig.sigmoid_k);
 
         return {
             ...paper,

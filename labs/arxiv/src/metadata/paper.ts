@@ -1,4 +1,4 @@
-import type { AITools } from "../libs/ai-tool";
+import type { AITools } from "../libs/ai-tools";
 import type { UserMetadata } from "../types/user";
 import type { Paper, PaperMetadata } from "../types/paper";
 import { z } from "zod";
@@ -6,17 +6,17 @@ import { z } from "zod";
 export const getPaperMetadata = async (
     aiTools: AITools,
     paper: Paper,
-    userMetadata: UserMetadata
+    userMetadata?: UserMetadata
 ): Promise<PaperMetadata | null> => {
 
-    const pickupUserMetadata = {
+    const pickupUserMetadata = userMetadata && {
         interest: {
-            tags: userMetadata.interest.tags.sort(() => Math.random() - 0.5).slice(0, 10).map(tag => tag.toLowerCase().trim()),
-            target: userMetadata.interest.target.sort(() => Math.random() - 0.5).slice(0, 10).map(target => target.toLowerCase().trim())
+            tags: userMetadata.interest.tags.sort(() => Math.random() - 0.5).slice(0, 10).map(tag => tag.value.toLowerCase().trim()),
+            target: userMetadata.interest.target.sort(() => Math.random() - 0.5).slice(0, 10).map(target => target.value.toLowerCase().trim())
         },
         notInterest: {
-            tags: userMetadata.notInterest.tags.sort(() => Math.random() - 0.5).slice(0, 10).map(tag => tag.toLowerCase().trim()),
-            target: userMetadata.notInterest.target.sort(() => Math.random() - 0.5).slice(0, 10).map(target => target.toLowerCase().trim())
+            tags: userMetadata.notInterest.tags.sort(() => Math.random() - 0.5).slice(0, 10).map(tag => tag.value.toLowerCase().trim()),
+            target: userMetadata.notInterest.target.sort(() => Math.random() - 0.5).slice(0, 10).map(target => target.value.toLowerCase().trim())
         }
     }
 
@@ -29,13 +29,13 @@ export const getPaperMetadata = async (
 # Instructions
 Based on the information in the following papers, please summarize the tags, targets, keywords, topics, and types of papers. Please output the results in JSON format.
 please do not use words that are too common or words that can be abbreviated to obscure the context. Please tag them reliably and clearly.
-However, please see the following example of a user's tag and be aware of the relative nature of the output to that tag.
+${pickupUserMetadata && `However, please see the following example of a user's tag and be aware of the relative nature of the output to that tag.
 
 ## User's tag
 - InterestedTarget: ${pickupUserMetadata.interest.target.join(", ")}
 - InterestedTags: ${pickupUserMetadata.interest.tags.join(", ")}
 - notInterestedTarget: ${pickupUserMetadata.notInterest.target.join(", ")}
-- notInterestedTags: ${pickupUserMetadata.notInterest.tags.join(", ")}
+- notInterestedTags: ${pickupUserMetadata.notInterest.tags.join(", ")}`}
 
 ## Article Title.
 ${title}
@@ -63,7 +63,7 @@ ${summary.replace(/\n/g, " ")}`,
 export const getPapersMetadata = async (
     aiTools: AITools,
     papers: Paper[],
-    userMetadata: UserMetadata
+    userMetadata?: UserMetadata
 ): Promise<PaperMetadata[]> => {
     console.debug("getting papers metadata...");
 

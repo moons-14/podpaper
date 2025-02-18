@@ -1,11 +1,23 @@
 export type UserMetadata = {
     interest: {
-        target: string[],
-        tags: string[],
+        target: {
+            value: string,
+            weight: number,
+        }[],
+        tags: {
+            value: string,
+            weight: number,
+        }[],
     },
     notInterest: {
-        target: string[],
-        tags: string[],
+        target: {
+            value: string,
+            weight: number,
+        }[],
+        tags: {
+            value: string,
+            weight: number,
+        }[],
     }
 }
 
@@ -14,20 +26,24 @@ export type UserMetadataEmbedding = {
         target: {
             embedding: number[],
             value: string,
+            weight: number,
         }[],
         tags: {
             embedding: number[],
             value: string,
+            weight: number,
         }[],
     },
     notInterest: {
         target: {
             embedding: number[],
             value: string,
+            weight: number,
         }[],
         tags: {
             embedding: number[],
             value: string,
+            weight: number,
         }[],
     }
 }

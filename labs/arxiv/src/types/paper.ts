@@ -42,3 +42,10 @@ export type PaperMetadataScore = {
 export type PaperMetadataWithScore = PaperMetadataEmbedding & {
     scores: PaperMetadataScore
 }
+
+export type TranslatedPaper<T> ={
+    translated: {
+        title: string,
+        summary: string,
+    }
+} & T

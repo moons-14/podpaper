@@ -1,5 +1,5 @@
 import { createGoogleGenerativeAI, type GoogleGenerativeAIProvider } from "@ai-sdk/google";
-import { embed, embedMany, generateObject, type Schema } from "ai";
+import { embed, embedMany, generateObject, generateText, type Schema } from "ai";
 import type { z } from "zod";
 
 export class AITools {
@@ -70,6 +70,7 @@ export class AITools {
                 schema,
                 prompt,
                 system,
+                temperature: 0.3
             });
 
             return result.object;
@@ -77,5 +78,16 @@ export class AITools {
             console.error(e);
             return null;
         }
+    }
+
+    public async genText(prompt: string, system?: string) {
+        const result = await generateText({
+            model: this.google("gemini-2.0-flash"),
+            prompt,
+            system,
+            temperature: 0.3
+        });
+
+        return result.text;
     }
 }

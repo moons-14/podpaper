@@ -1,9 +1,10 @@
-import { config } from "./config";
+import { recommendConfig } from "./config";
 import { AITools } from "./libs/ai-tools";
 import { scorePapers, sortPapers } from "./score";
 import type { UserMetadata } from "./types/user";
-import { getArxivPapersWithCache } from "./utils/arxiv";
+import { getArxivPapersWithCache } from "./libs/arxiv";
 import fs from 'node:fs';
+import { getUserMetadata } from "./metadata/user";
 
 export const getRecommendedPapers = async (
     aiTools: AITools,
@@ -21,20 +22,27 @@ export const getRecommendedPapers = async (
 }
 
 const main = async () => {
-    const userMetadata = {
-        interest: {
-            target: ['web developer', 'data scientist'],
-            tags: ["machine learning", "LLM", "healthcare", "social engineering", "IoT"],
-        },
-        notInterest: {
-            target: ['biology', 'geology'],
-            tags: ['biology scientist', 'geology scientist'],
-        }
+    // const userMetadata = {
+    //     interest: {
+    //         target: ['web developer', 'data scientist'],
+    //         tags: ["machine learning", "LLM", "healthcare", "social engineering", "IoT"],
+    //     },
+    //     notInterest: {
+    //         target: ['biology', 'geology'],
+    //         tags: ['biology scientist', 'geology scientist'],
+    //     }
+    // }
+
+    const userMetadata = await getUserMetadata();
+
+    if (!userMetadata) {
+        console.log("User metadata not found");
+        return;
     }
 
     const aiTools = new AITools(process.env.AI_STUDIO_API_KEY || "", process.env.AI_STUDIO_BASE_URL);
 
-    const papers = await getRecommendedPapers(aiTools, userMetadata, config.queryCategory, config.timeFilterMS);
+    const papers = await getRecommendedPapers(aiTools, userMetadata, recommendConfig.queryCategory, recommendConfig.timeFilterMS);
 
     console.table(papers.slice(0, 10).map(paper => ({
         title: paper.title,
